@@ -23,6 +23,7 @@ export const WEEK_PATTERN_LABELS = {
   all: "每周",
   odd: "单周",
   even: "双周",
+  custom: "自定义周次",
 };
 
 export const BUDGET_LEVELS = [
