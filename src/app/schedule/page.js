@@ -12,6 +12,8 @@ import {
   courseActiveOnWeek,
 } from "@/lib/constants";
 
+const ALL_WEEK_NUMBERS = Array.from({ length: 20 }, (_, i) => i + 1);
+
 function emptyDraft(day, period) {
   return {
     id: null,
@@ -20,6 +22,7 @@ function emptyDraft(day, period) {
     teacher: "",
     hue: COLOR_HUE_PRESETS[0],
     weekPattern: "all",
+    customWeeks: [],
     day,
     periodStart: period,
     periodCount: 1,
@@ -86,6 +89,7 @@ function ScheduleInner() {
       teacher: course.teacher || "",
       hue: course.color_hue,
       weekPattern: course.week_pattern,
+      customWeeks: course.custom_weeks || [],
       day: slot.day_of_week,
       periodStart: slot.period_start,
       periodCount: slot.period_count,
@@ -97,8 +101,13 @@ function ScheduleInner() {
       setErrorMsg("请填写课程名称");
       return;
     }
+    if (draft.weekPattern === "custom" && draft.customWeeks.length === 0) {
+      setErrorMsg("请至少选一个上课周");
+      return;
+    }
     setSaving(true);
     setErrorMsg("");
+    const customWeeksToSave = draft.weekPattern === "custom" ? draft.customWeeks : null;
 
     if (draft.id) {
       // 编辑已有课程
@@ -109,6 +118,7 @@ function ScheduleInner() {
           teacher: draft.teacher.trim(),
           color_hue: draft.hue,
           week_pattern: draft.weekPattern,
+          custom_weeks: customWeeksToSave,
         })
         .eq("id", draft.id);
       const { error: sErr } = await supabase
@@ -134,6 +144,7 @@ function ScheduleInner() {
           teacher: draft.teacher.trim(),
           color_hue: draft.hue,
           week_pattern: draft.weekPattern,
+          custom_weeks: customWeeksToSave,
         })
         .select()
         .single();
@@ -340,8 +351,44 @@ function ScheduleInner() {
                 <option value="all">每周</option>
                 <option value="odd">单周</option>
                 <option value="even">双周</option>
+                <option value="custom">自定义（不规律，比如提前结课/中间停课）</option>
               </select>
             </div>
+            {draft.weekPattern === "custom" && (
+              <div className="field">
+                <label>勾选哪几周上课</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {ALL_WEEK_NUMBERS.map((w) => {
+                    const checked = draft.customWeeks.includes(w);
+                    return (
+                      <div
+                        key={w}
+                        onClick={() => {
+                          const next = checked
+                            ? draft.customWeeks.filter((x) => x !== w)
+                            : [...draft.customWeeks, w];
+                          setDraft({ ...draft, customWeeks: next });
+                        }}
+                        style={{
+                          width: 28,
+                          height: 28,
+                          borderRadius: 6,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          background: checked ? "var(--teal)" : "var(--teal-soft)",
+                          color: checked ? "#fff" : "var(--teal)",
+                        }}
+                      >
+                        {w}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <div className="field">
               <label>星期</label>
               <select
