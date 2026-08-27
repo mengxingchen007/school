@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import ProtectedShell from "@/components/ProtectedShell";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
@@ -9,6 +10,7 @@ import {
   DEFAULT_PERIOD_TIMES,
   COLOR_HUE_PRESETS,
   WEEK_PATTERN_LABELS,
+  TASK_TYPE_INFO,
   courseActiveOnWeek,
 } from "@/lib/constants";
 
@@ -48,8 +50,10 @@ export default function SchedulePage() {
 
 function ScheduleInner() {
   const { user } = useUser();
+  const router = useRouter();
   const [courses, setCourses] = useState([]);
   const [slots, setSlots] = useState([]);
+  const [tasks, setTasks] = useState([]);
   const [week, setWeek] = useState(1);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState(null);
@@ -76,13 +80,20 @@ function ScheduleInner() {
 
   async function loadAll() {
     setLoading(true);
-    const [{ data: courseRows }, { data: slotRows }] = await Promise.all([
+    const [{ data: courseRows }, { data: slotRows }, { data: taskRows }] = await Promise.all([
       supabase.from("courses").select("*").eq("owner_id", user.id),
       supabase.from("schedule_slots").select("*").eq("owner_id", user.id),
+      supabase.from("tasks").select("*").eq("owner_id", user.id),
     ]);
     setCourses(courseRows || []);
     setSlots(slotRows || []);
+    setTasks(taskRows || []);
     setLoading(false);
+  }
+
+  // 某门课在当前查看的这一周，有没有关联的、还没完成的作业/考试
+  function pendingTasksForCourse(courseId) {
+    return tasks.filter((t) => t.course_id === courseId && t.week_number === week && !t.done);
   }
 
   function slotAt(day, period) {
@@ -305,6 +316,7 @@ function ScheduleInner() {
                   const isStart = slot && slot.period_start === p.period;
                   if (slot && !isStart) return null; // 被上面的格子合并占用了
                   const course = slot ? courses.find((c) => c.id === slot.course_id) : null;
+                  const pendingCourseTasks = course ? pendingTasksForCourse(course.id) : [];
                   return (
                     <div
                       key={dayIdx + "-" + p.period}
@@ -321,6 +333,7 @@ function ScheduleInner() {
                       {course && (
                         <div
                           style={{
+                            position: "relative",
                             height: "100%",
                             borderRadius: 8,
                             padding: "6px 8px",
@@ -329,6 +342,38 @@ function ScheduleInner() {
                             fontSize: 12,
                           }}
                         >
+                          {pendingCourseTasks.length > 0 && (
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                router.push("/tasks");
+                              }}
+                              title={pendingCourseTasks.map((t) => t.title).join("、")}
+                              style={{
+                                position: "absolute",
+                                top: -6,
+                                right: -6,
+                                display: "flex",
+                                gap: 2,
+                                cursor: "pointer",
+                              }}
+                            >
+                              {pendingCourseTasks.slice(0, 3).map((t) => (
+                                <span
+                                  key={t.id}
+                                  style={{
+                                    width: 10,
+                                    height: 10,
+                                    borderRadius: "50%",
+                                    display: "block",
+                                    background: `hsl(${TASK_TYPE_INFO[t.type].hue}, 75%, 50%)`,
+                                    border: "1.5px solid #fff",
+                                    boxShadow: "0 0 0 1px rgba(0,0,0,0.1)",
+                                  }}
+                                />
+                              ))}
+                            </div>
+                          )}
                           <div style={{ fontWeight: 700 }}>{course.name}</div>
                           {course.teacher && <div>{course.teacher}</div>}
                           {course.week_pattern !== "all" && (
@@ -346,7 +391,7 @@ function ScheduleInner() {
       )}
 
       <p style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 12 }}>
-        点空格子可以添加新课程，点已有的课程格子可以编辑或删除。
+        点空格子可以添加新课程，点已有的课程格子可以编辑或删除。课程右上角的小圆点表示这门课本周有还没完成的作业/考试（黄色是作业，红色是考试），点小圆点可以直接跳到"作业考试"页面查看。
       </p>
 
       {draft && (
