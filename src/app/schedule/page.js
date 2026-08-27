@@ -40,6 +40,39 @@ function emptyDraft(day, period) {
   };
 }
 
+// 把用户选的图片压缩到一个合理的尺寸再转成 base64，避免手机拍照的原图太大（上传慢、也可能超出后端处理上限）
+function resizeImageForRecognition(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("图片读取失败"));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("图片解析失败，换一张试试"));
+      img.onload = () => {
+        const maxDim = 1600;
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function SchedulePage() {
   return (
     <ProtectedShell>
@@ -60,6 +93,15 @@ function ScheduleInner() {
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const dragRef = useRef({ active: false, target: true });
+
+  // ↓↓↓ 拍照识别课表功能用到的状态，独立于上面已有的逻辑
+  const [showRecognize, setShowRecognize] = useState(false);
+  const [recognizeImage, setRecognizeImage] = useState(null);
+  const [recognizing, setRecognizing] = useState(false);
+  const [recognizeError, setRecognizeError] = useState("");
+  const [recognizedCourses, setRecognizedCourses] = useState([]);
+  const [importing, setImporting] = useState(false);
+  const recognizeFileInputRef = useRef(null);
 
   useEffect(() => {
     function endDrag() {
@@ -262,13 +304,126 @@ function ScheduleInner() {
     loadAll();
   }
 
+  // ↓↓↓ 拍照识别课表：全部是新增的功能，不会调用/影响上面已有的添加课程逻辑
+  function openRecognize() {
+    setRecognizeError("");
+    setRecognizeImage(null);
+    setRecognizedCourses([]);
+    setShowRecognize(true);
+  }
+
+  async function handleRecognizeFileChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setRecognizeError("");
+    setRecognizedCourses([]);
+    try {
+      const dataUrl = await resizeImageForRecognition(file);
+      setRecognizeImage(dataUrl);
+    } catch (err) {
+      setRecognizeError("图片处理失败：" + err.message);
+    }
+  }
+
+  async function runRecognition() {
+    if (!recognizeImage) return;
+    setRecognizing(true);
+    setRecognizeError("");
+    try {
+      const base64 = recognizeImage.split(",")[1];
+      const res = await fetch("/api/recognize-schedule", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ imageBase64: base64, mediaType: "image/jpeg" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setRecognizeError(data.error || "识别失败，请重试");
+        setRecognizing(false);
+        return;
+      }
+      const drafts = (data.courses || []).map((c, idx) => ({
+        include: true,
+        name: c.name || "",
+        teacher: c.teacher || "",
+        day: typeof c.day_of_week === "number" ? c.day_of_week : 0,
+        periodStart: c.period_start || 1,
+        periodCount: c.period_count || 1,
+        weekPattern: ["all", "odd", "even"].includes(c.week_pattern) ? c.week_pattern : "all",
+        hue: COLOR_HUE_PRESETS[idx % COLOR_HUE_PRESETS.length],
+      }));
+      setRecognizedCourses(drafts);
+      if (drafts.length === 0) {
+        setRecognizeError("没识别出课程，换一张更清晰、更完整的课表图片再试试");
+      }
+    } catch (err) {
+      setRecognizeError("识别失败：" + err.message);
+    }
+    setRecognizing(false);
+  }
+
+  function updateRecognizedCourse(idx, patch) {
+    setRecognizedCourses((prev) => prev.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
+  }
+
+  function removeRecognizedRow(idx) {
+    setRecognizedCourses((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  async function confirmImport() {
+    const toImport = recognizedCourses.filter((c) => c.include && c.name.trim());
+    if (toImport.length === 0) {
+      setRecognizeError("请至少保留一门课程再导入");
+      return;
+    }
+    setImporting(true);
+    setRecognizeError("");
+    for (const c of toImport) {
+      const { data: newCourse, error: cErr } = await supabase
+        .from("courses")
+        .insert({
+          owner_id: user.id,
+          name: c.name.trim(),
+          teacher: c.teacher.trim(),
+          color_hue: c.hue,
+          week_pattern: c.weekPattern,
+          custom_weeks: null,
+        })
+        .select()
+        .single();
+      if (cErr) {
+        setRecognizeError("导入「" + c.name + "」失败：" + cErr.message);
+        setImporting(false);
+        return;
+      }
+      const { error: sErr } = await supabase.from("schedule_slots").insert({
+        owner_id: user.id,
+        course_id: newCourse.id,
+        day_of_week: c.day,
+        period_start: c.periodStart,
+        period_count: c.periodCount,
+      });
+      if (sErr) {
+        setRecognizeError("导入「" + c.name + "」失败：" + sErr.message);
+        setImporting(false);
+        return;
+      }
+    }
+    setImporting(false);
+    setShowRecognize(false);
+    loadAll();
+  }
+
   const periods = DEFAULT_PERIOD_TIMES;
 
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
         <h2 style={{ margin: 0 }}>课表</h2>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <button className="btn secondary" onClick={openRecognize}>
+            拍照识别课表
+          </button>
           <button className="btn secondary" onClick={() => setWeek((w) => Math.max(1, w - 1))}>
             上一周
           </button>
@@ -625,6 +780,176 @@ function ScheduleInner() {
               <button className="btn" disabled={saving} onClick={saveDraft}>
                 {saving ? "保存中..." : "保存"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRecognize && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 50,
+            padding: 16,
+          }}
+          onClick={() => !recognizing && !importing && setShowRecognize(false)}
+        >
+          <div
+            className="card"
+            style={{ width: 480, maxWidth: "100%", maxHeight: "88vh", overflowY: "auto" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 style={{ marginTop: 0 }}>拍照识别课表</h3>
+            <p style={{ fontSize: 13, color: "var(--ink-soft)" }}>
+              选一张课表的照片或截图，AI 会自动识别里面的课程。识别完你可以先检查、修改每一条，确认没问题了再点"确认导入"，不会自动覆盖你已经添加好的课程。
+            </p>
+
+            <input
+              ref={recognizeFileInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              style={{ display: "none" }}
+              onChange={handleRecognizeFileChange}
+            />
+
+            {!recognizeImage ? (
+              <button className="btn" onClick={() => recognizeFileInputRef.current?.click()}>
+                选择图片 / 拍照
+              </button>
+            ) : (
+              <div>
+                <img
+                  src={recognizeImage}
+                  alt="课表预览"
+                  style={{ maxWidth: "100%", borderRadius: 8, marginBottom: 10, display: "block" }}
+                />
+                <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                  <button
+                    className="btn secondary"
+                    disabled={recognizing || importing}
+                    onClick={() => {
+                      setRecognizeImage(null);
+                      setRecognizedCourses([]);
+                      setRecognizeError("");
+                    }}
+                  >
+                    重新选择
+                  </button>
+                  <button className="btn" disabled={recognizing || importing} onClick={runRecognition}>
+                    {recognizing ? "识别中..." : "开始识别"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {recognizeError && (
+              <div style={{ color: "var(--red)", fontSize: 13, marginBottom: 10 }}>{recognizeError}</div>
+            )}
+
+            {recognizedCourses.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 6 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>
+                  识别到 {recognizedCourses.length} 门课，检查一下再导入：
+                </div>
+                {recognizedCourses.map((c, idx) => (
+                  <div key={idx} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 8 }}>
+                    <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={c.include}
+                        onChange={(e) => updateRecognizedCourse(idx, { include: e.target.checked })}
+                      />
+                      <input
+                        className="input"
+                        style={{ flex: 1 }}
+                        value={c.name}
+                        placeholder="课程名称"
+                        onChange={(e) => updateRecognizedCourse(idx, { name: e.target.value })}
+                      />
+                      <button className="btn danger" onClick={() => removeRecognizedRow(idx)}>
+                        删除
+                      </button>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <input
+                        className="input"
+                        style={{ width: 100 }}
+                        value={c.teacher}
+                        placeholder="老师（可选）"
+                        onChange={(e) => updateRecognizedCourse(idx, { teacher: e.target.value })}
+                      />
+                      <select
+                        className="input"
+                        style={{ width: 80 }}
+                        value={c.day}
+                        onChange={(e) => updateRecognizedCourse(idx, { day: Number(e.target.value) })}
+                      >
+                        {WEEKDAY_LABELS.map((label, i) => (
+                          <option key={i} value={i}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="input"
+                        style={{ width: 90 }}
+                        value={c.periodStart}
+                        onChange={(e) => updateRecognizedCourse(idx, { periodStart: Number(e.target.value) })}
+                      >
+                        {DEFAULT_PERIOD_TIMES.map((p) => (
+                          <option key={p.period} value={p.period}>
+                            第{p.period}节
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="input"
+                        style={{ width: 80 }}
+                        value={c.periodCount}
+                        onChange={(e) => updateRecognizedCourse(idx, { periodCount: Number(e.target.value) })}
+                      >
+                        {[1, 2, 3, 4].map((n) => (
+                          <option key={n} value={n}>
+                            {n} 节
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="input"
+                        style={{ width: 80 }}
+                        value={c.weekPattern}
+                        onChange={(e) => updateRecognizedCourse(idx, { weekPattern: e.target.value })}
+                      >
+                        <option value="all">每周</option>
+                        <option value="odd">单周</option>
+                        <option value="even">双周</option>
+                      </select>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+              <div style={{ flex: 1 }} />
+              <button
+                className="btn secondary"
+                disabled={recognizing || importing}
+                onClick={() => setShowRecognize(false)}
+              >
+                取消
+              </button>
+              {recognizedCourses.length > 0 && (
+                <button className="btn" disabled={importing} onClick={confirmImport}>
+                  {importing ? "导入中..." : `确认导入（${recognizedCourses.filter((c) => c.include).length} 门）`}
+                </button>
+              )}
             </div>
           </div>
         </div>
