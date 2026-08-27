@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import ProtectedShell from "@/components/ProtectedShell";
 import { supabase } from "@/lib/supabaseClient";
 import { useUser } from "@/lib/useUser";
@@ -13,6 +13,16 @@ import {
 } from "@/lib/constants";
 
 const ALL_WEEK_NUMBERS = Array.from({ length: 20 }, (_, i) => i + 1);
+const ODD_WEEK_NUMBERS = ALL_WEEK_NUMBERS.filter((w) => w % 2 === 1);
+const EVEN_WEEK_NUMBERS = ALL_WEEK_NUMBERS.filter((w) => w % 2 === 0);
+
+// 把旧数据（week_pattern 是 all/odd/even/custom）换算成具体的周数列表，方便在勾选格里显示
+function weeksFromCourse(course) {
+  if (course.week_pattern === "odd") return [...ODD_WEEK_NUMBERS];
+  if (course.week_pattern === "even") return [...EVEN_WEEK_NUMBERS];
+  if (course.week_pattern === "custom") return course.custom_weeks || [];
+  return [...ALL_WEEK_NUMBERS];
+}
 
 function emptyDraft(day, period) {
   return {
@@ -21,8 +31,7 @@ function emptyDraft(day, period) {
     name: "",
     teacher: "",
     hue: COLOR_HUE_PRESETS[0],
-    weekPattern: "all",
-    customWeeks: [],
+    customWeeks: [...ALL_WEEK_NUMBERS],
     day,
     periodStart: period,
     periodCount: 1,
@@ -46,6 +55,19 @@ function ScheduleInner() {
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const dragRef = useRef({ active: false, target: true });
+
+  useEffect(() => {
+    function endDrag() {
+      dragRef.current.active = false;
+    }
+    window.addEventListener("mouseup", endDrag);
+    window.addEventListener("touchend", endDrag);
+    return () => {
+      window.removeEventListener("mouseup", endDrag);
+      window.removeEventListener("touchend", endDrag);
+    };
+  }, []);
 
   useEffect(() => {
     if (user) loadAll();
@@ -88,12 +110,48 @@ function ScheduleInner() {
       name: course.name,
       teacher: course.teacher || "",
       hue: course.color_hue,
-      weekPattern: course.week_pattern,
-      customWeeks: course.custom_weeks || [],
+      customWeeks: weeksFromCourse(course),
       day: slot.day_of_week,
       periodStart: slot.period_start,
       periodCount: slot.period_count,
     });
+  }
+
+  function setWeekChecked(w, checked) {
+    setDraft((prev) => {
+      const has = prev.customWeeks.includes(w);
+      if (has === checked) return prev;
+      const next = checked ? [...prev.customWeeks, w] : prev.customWeeks.filter((x) => x !== w);
+      return { ...prev, customWeeks: next };
+    });
+  }
+
+  function handleWeekDown(w) {
+    const isChecked = draft.customWeeks.includes(w);
+    const target = !isChecked;
+    dragRef.current = { active: true, target };
+    setWeekChecked(w, target);
+  }
+
+  function handleWeekEnter(w) {
+    if (!dragRef.current.active) return;
+    setWeekChecked(w, dragRef.current.target);
+  }
+
+  function handleWeekTouchMove(e) {
+    if (!dragRef.current.active) return;
+    const touch = e.touches[0];
+    if (!touch) return;
+    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+    const w = el?.getAttribute?.("data-week");
+    if (w) {
+      e.preventDefault();
+      setWeekChecked(Number(w), dragRef.current.target);
+    }
+  }
+
+  function applyWeekPreset(list) {
+    setDraft((prev) => ({ ...prev, customWeeks: [...list] }));
   }
 
   async function saveDraft() {
@@ -101,13 +159,15 @@ function ScheduleInner() {
       setErrorMsg("请填写课程名称");
       return;
     }
-    if (draft.weekPattern === "custom" && draft.customWeeks.length === 0) {
+    if (draft.customWeeks.length === 0) {
       setErrorMsg("请至少选一个上课周");
       return;
     }
     setSaving(true);
     setErrorMsg("");
-    const customWeeksToSave = draft.weekPattern === "custom" ? draft.customWeeks : null;
+    const isAllWeeks = draft.customWeeks.length === ALL_WEEK_NUMBERS.length;
+    const weekPatternToSave = isAllWeeks ? "all" : "custom";
+    const customWeeksToSave = isAllWeeks ? null : [...draft.customWeeks].sort((a, b) => a - b);
 
     if (draft.id) {
       // 编辑已有课程
@@ -117,7 +177,7 @@ function ScheduleInner() {
           name: draft.name.trim(),
           teacher: draft.teacher.trim(),
           color_hue: draft.hue,
-          week_pattern: draft.weekPattern,
+          week_pattern: weekPatternToSave,
           custom_weeks: customWeeksToSave,
         })
         .eq("id", draft.id);
@@ -143,7 +203,7 @@ function ScheduleInner() {
           name: draft.name.trim(),
           teacher: draft.teacher.trim(),
           color_hue: draft.hue,
-          week_pattern: draft.weekPattern,
+          week_pattern: weekPatternToSave,
           custom_weeks: customWeeksToSave,
         })
         .select()
@@ -343,52 +403,57 @@ function ScheduleInner() {
             </div>
             <div className="field">
               <label>上课周次</label>
-              <select
-                className="input"
-                value={draft.weekPattern}
-                onChange={(e) => setDraft({ ...draft, weekPattern: e.target.value })}
-              >
-                <option value="all">每周</option>
-                <option value="odd">单周</option>
-                <option value="even">双周</option>
-                <option value="custom">自定义（不规律，比如提前结课/中间停课）</option>
-              </select>
-            </div>
-            {draft.weekPattern === "custom" && (
-              <div className="field">
-                <label>勾选哪几周上课</label>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {ALL_WEEK_NUMBERS.map((w) => {
-                    const checked = draft.customWeeks.includes(w);
-                    return (
-                      <div
-                        key={w}
-                        onClick={() => {
-                          const next = checked
-                            ? draft.customWeeks.filter((x) => x !== w)
-                            : [...draft.customWeeks, w];
-                          setDraft({ ...draft, customWeeks: next });
-                        }}
-                        style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 6,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: 12,
-                          cursor: "pointer",
-                          background: checked ? "var(--teal)" : "var(--teal-soft)",
-                          color: checked ? "#fff" : "var(--teal)",
-                        }}
-                      >
-                        {w}
-                      </div>
-                    );
-                  })}
-                </div>
+              <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+                <button type="button" className="btn secondary" onClick={() => applyWeekPreset(ALL_WEEK_NUMBERS)}>
+                  全选
+                </button>
+                <button type="button" className="btn secondary" onClick={() => applyWeekPreset(ODD_WEEK_NUMBERS)}>
+                  单周
+                </button>
+                <button type="button" className="btn secondary" onClick={() => applyWeekPreset(EVEN_WEEK_NUMBERS)}>
+                  双周
+                </button>
+                <button type="button" className="btn secondary" onClick={() => applyWeekPreset([])}>
+                  清空
+                </button>
               </div>
-            )}
+              <div
+                style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 6 }}
+              >
+                先点上面的快捷按钮选一个基础模式，再按住鼠标（手机上按住手指）划过下面的格子，可以连续勾选/取消某几周（比如"单周"基础上再去掉提前结课的那几周）
+              </div>
+              <div
+                style={{ display: "flex", flexWrap: "wrap", gap: 6, userSelect: "none", touchAction: "none" }}
+                onTouchMove={handleWeekTouchMove}
+              >
+                {ALL_WEEK_NUMBERS.map((w) => {
+                  const checked = draft.customWeeks.includes(w);
+                  return (
+                    <div
+                      key={w}
+                      data-week={w}
+                      onMouseDown={() => handleWeekDown(w)}
+                      onMouseEnter={() => handleWeekEnter(w)}
+                      onTouchStart={() => handleWeekDown(w)}
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 6,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 12,
+                        cursor: "pointer",
+                        background: checked ? "var(--teal)" : "var(--teal-soft)",
+                        color: checked ? "#fff" : "var(--teal)",
+                      }}
+                    >
+                      {w}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
             <div className="field">
               <label>星期</label>
               <select
