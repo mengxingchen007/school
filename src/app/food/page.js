@@ -44,6 +44,13 @@ function FoodInner() {
   const [result, setResult] = useState(null);
   const [history, setHistory] = useState([]);
 
+  // ↓↓↓ 附近吃饭地点（真实定位 + 地图数据），全部是新增状态，跟上面已有的清单/抽签逻辑互不影响
+  const [nearbyResults, setNearbyResults] = useState([]);
+  const [nearbyLoading, setNearbyLoading] = useState(false);
+  const [nearbyError, setNearbyError] = useState("");
+  const [nearbyRadius, setNearbyRadius] = useState(1000);
+  const [nearbySearched, setNearbySearched] = useState(false);
+
   useEffect(() => {
     if (user) loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -135,6 +142,57 @@ function FoodInner() {
         loadAll();
       }
     }, 90);
+  }
+
+  // ↓↓↓ 附近吃饭地点：全部是新增的功能，不调用/不影响上面已有的清单和抽签逻辑
+  function findNearby() {
+    if (!navigator.geolocation) {
+      setNearbyError("你的浏览器不支持定位功能，换一个浏览器试试");
+      return;
+    }
+    setNearbyLoading(true);
+    setNearbyError("");
+    setNearbySearched(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords;
+        try {
+          const res = await fetch(`/api/nearby-food?lat=${latitude}&lng=${longitude}&radius=${nearbyRadius}`);
+          const data = await res.json();
+          if (!res.ok) {
+            setNearbyError(data.error || "查询失败，请重试");
+            setNearbyResults([]);
+          } else {
+            setNearbyResults(data.places || []);
+          }
+        } catch (err) {
+          setNearbyError("查询失败：" + err.message);
+        }
+        setNearbyLoading(false);
+      },
+      (err) => {
+        setNearbyError(
+          err.code === err.PERMISSION_DENIED
+            ? "没有获取到定位权限，需要在浏览器/系统设置里允许这个网站访问你的位置才能用这个功能"
+            : "获取位置失败：" + err.message
+        );
+        setNearbyLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  }
+
+  function addNearbyToList(place) {
+    setErrorMsg("");
+    setDraft({
+      name: place.name,
+      budgetLevel: 1,
+      isOpen: true,
+      waitMinutes: 0,
+      distanceMeters: place.distance || 500,
+      isPublic: tab === "public",
+    });
+    setShowAdd(true);
   }
 
   return (
@@ -252,6 +310,78 @@ function FoodInner() {
           ))}
         </div>
       )}
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 8,
+            marginBottom: 8,
+          }}
+        >
+          <div style={{ fontWeight: 700, fontSize: 14 }}>附近吃饭地点（基于你的实时定位）</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <select
+              className="input"
+              style={{ width: 100 }}
+              value={nearbyRadius}
+              onChange={(e) => setNearbyRadius(Number(e.target.value))}
+            >
+              <option value={500}>500米内</option>
+              <option value={1000}>1公里内</option>
+              <option value={2000}>2公里内</option>
+              <option value={3000}>3公里内</option>
+            </select>
+            <button className="btn secondary" disabled={nearbyLoading} onClick={findNearby}>
+              {nearbyLoading ? "查找中..." : "查找附近"}
+            </button>
+          </div>
+        </div>
+        <div style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 10 }}>
+          点"查找附近"时浏览器会弹出定位权限请求，需要允许才能查到真实距离；价格、营业时间等信息以地图数据为准，个别小店可能没有收录，仅供参考。
+        </div>
+
+        {nearbyError && <div style={{ color: "var(--red)", fontSize: 13, marginBottom: 10 }}>{nearbyError}</div>}
+
+        {nearbyResults.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {nearbyResults.map((p) => (
+              <div
+                key={p.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  borderTop: "1px solid var(--border)",
+                  paddingTop: 8,
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600 }}>{p.name}</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                    {p.address || "地址未知"}
+                    {p.distance != null && (
+                      <> · 距你约 {p.distance >= 1000 ? (p.distance / 1000).toFixed(1) + "km" : p.distance + "m"}</>
+                    )}
+                    {p.cost != null && <> · 人均约¥{p.cost}</>}
+                    {p.rating != null && <> · 评分 {p.rating}</>}
+                  </div>
+                </div>
+                <button className="btn secondary" onClick={() => addNearbyToList(p)}>
+                  加入我的清单
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!nearbyLoading && nearbySearched && nearbyResults.length === 0 && !nearbyError && (
+          <div style={{ fontSize: 13, color: "var(--ink-soft)" }}>没查到结果，换个更大的范围试试</div>
+        )}
+      </div>
 
       {history.length > 0 && (
         <div className="card" style={{ marginTop: 16 }}>
