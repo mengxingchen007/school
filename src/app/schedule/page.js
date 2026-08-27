@@ -96,6 +96,16 @@ function ScheduleInner() {
     return tasks.filter((t) => t.course_id === courseId && t.week_number === week && !t.done);
   }
 
+  // 当前查看的这一周，某一天有哪些还没完成的作业/考试（不管这天有没有课）
+  function pendingTasksForDay(dayIdx) {
+    return tasks.filter((t) => t.week_number === week && t.day_of_week === dayIdx && !t.done);
+  }
+
+  async function toggleTaskDone(task) {
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, done: true } : t)));
+    await supabase.from("tasks").update({ done: true }).eq("id", task.id);
+  }
+
   function slotAt(day, period) {
     return slots.find((s) => {
       if (s.day_of_week !== day) return false;
@@ -297,6 +307,62 @@ function ScheduleInner() {
               </div>
             ))}
 
+            <div style={{ borderTop: "1px solid var(--border)" }} />
+            {WEEKDAY_LABELS.map((_, dayIdx) => {
+              const dayTasks = pendingTasksForDay(dayIdx);
+              return (
+                <div
+                  key={"ddl-" + dayIdx}
+                  style={{
+                    borderTop: "1px solid var(--border)",
+                    borderLeft: "1px solid var(--border)",
+                    minHeight: 26,
+                    padding: "3px 4px",
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 3,
+                    alignContent: "flex-start",
+                  }}
+                >
+                  {dayTasks.map((t) => {
+                    const course = courses.find((c) => c.id === t.course_id);
+                    const label = course ? course.name.slice(0, 2) : TASK_TYPE_INFO[t.type].initial;
+                    const bgHue = course ? course.color_hue : TASK_TYPE_INFO[t.type].hue;
+                    return (
+                      <div
+                        key={t.id}
+                        onClick={() => toggleTaskDone(t)}
+                        title={`${course ? course.name + " · " : ""}${t.title}（点击标记完成）`}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 3,
+                          padding: "1px 5px",
+                          borderRadius: 6,
+                          fontSize: 10,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          background: `hsl(${bgHue}, 65%, 90%)`,
+                          color: `hsl(${bgHue}, 55%, 32%)`,
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: "50%",
+                            background: `hsl(${TASK_TYPE_INFO[t.type].hue}, 75%, 50%)`,
+                            flexShrink: 0,
+                          }}
+                        />
+                        {label}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+
             {periods.map((p) => (
               <Fragment key={p.period}>
                 <div
@@ -391,7 +457,7 @@ function ScheduleInner() {
       )}
 
       <p style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 12 }}>
-        点空格子可以添加新课程，点已有的课程格子可以编辑或删除。课程右上角的小圆点表示这门课本周有还没完成的作业/考试（黄色是作业，红色是考试），点小圆点可以直接跳到"作业考试"页面查看。
+        点空格子可以添加新课程，点已有的课程格子可以编辑或删除。课程右上角的小圆点表示这门课本周有还没完成的作业/考试，点小圆点可以直接跳到"作业考试"页面查看。日期下面单独一行的小标签是这一天要交的所有作业/考试（不管是不是这天上课都会显示），标签的底色对应课程颜色、里面的小圆点颜色区分作业（黄）还是考试（红），同一天有好几门课的作业时会分别显示、方便区分，点标签可以直接标记完成。
       </p>
 
       {draft && (
