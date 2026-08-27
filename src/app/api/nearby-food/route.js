@@ -1,5 +1,5 @@
-// 服务器端接口：浏览器把经纬度发到这里，由这里带着高德地图的密钥去查真实的周边餐饮地点，
-// 这样密钥（AMAP_KEY）只会留在服务器上，不会暴露给浏览器里的任何人。
+// 服务器端接口：浏览器把经纬度发到这里，由这里带着高德地图的密钥去查真实的周边餐饮地点。
+// 密钥（AMAP_KEY）只保留在服务器环境变量中，不会暴露给浏览器。
 export const runtime = "nodejs";
 
 export async function GET(request) {
@@ -23,8 +23,8 @@ export async function GET(request) {
 
     const url = new URL("https://restapi.amap.com/v3/place/around");
     url.searchParams.set("key", key);
-    url.searchParams.set("location", `${lng},${lat}`); // 高德要求经度在前、纬度在后
-    url.searchParams.set("types", "050000"); // 050000 = 餐饮服务大类
+    url.searchParams.set("location", `${lng},${lat}`);
+    url.searchParams.set("types", "050000");
     url.searchParams.set("radius", radius);
     url.searchParams.set("sortrule", "distance");
     url.searchParams.set("offset", "25");
@@ -35,21 +35,24 @@ export async function GET(request) {
     const data = await resp.json();
 
     if (data.status !== "1") {
-      return Response.json({ error: "地图服务查询失败：" + (data.info || "未知错误") }, { status: 500 });
+      return Response.json(
+        { error: "地图服务查询失败：" + (data.info || "未知错误") },
+        { status: 500 }
+      );
     }
 
-    const places = (data.pois || []).map((p) => ({
-      id: p.id,
-      name: p.name,
-      address: p.address || p.adname || "",
-      distance: p.distance ? Number(p.distance) : null,
-      tel: p.tel || "",
-      cost: p.biz_ext && p.biz_ext.cost ? Number(p.biz_ext.cost) : null,
-      rating: p.biz_ext && p.biz_ext.rating ? p.biz_ext.rating : null,
+    const places = (data.pois || []).map((place) => ({
+      id: place.id,
+      name: place.name,
+      address: place.address || place.adname || "",
+      distance: place.distance ? Number(place.distance) : null,
+      tel: place.tel || "",
+      cost: place.biz_ext?.cost ? Number(place.biz_ext.cost) : null,
+      rating: place.biz_ext?.rating || null,
     }));
 
     return Response.json({ places });
-  } catch (e) {
-    return Response.json({ error: "查询失败：" + e.message }, { status: 500 });
+  } catch (error) {
+    return Response.json({ error: "查询失败：" + error.message }, { status: 500 });
   }
 }

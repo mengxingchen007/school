@@ -171,14 +171,18 @@ function FoodInner() {
         setNearbyLoading(false);
       },
       (err) => {
-        setNearbyError(
-          err.code === err.PERMISSION_DENIED
-            ? "没有获取到定位权限，需要在浏览器/系统设置里允许这个网站访问你的位置才能用这个功能"
-            : "获取位置失败：" + err.message
-        );
+        if (err.code === err.PERMISSION_DENIED) {
+          setNearbyError("定位权限被拒绝，请在浏览器和系统设置中允许本网站访问你的位置");
+        } else if (err.code === err.POSITION_UNAVAILABLE) {
+          setNearbyError("暂时无法获得位置，请检查手机或电脑的系统定位服务是否已开启");
+        } else if (err.code === err.TIMEOUT) {
+          setNearbyError("定位超时，请稍后重试，或换到网络和定位信号更好的位置");
+        } else {
+          setNearbyError("获取位置失败：" + err.message);
+        }
         setNearbyLoading(false);
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: false, timeout: 20000, maximumAge: 300000 }
     );
   }
 
