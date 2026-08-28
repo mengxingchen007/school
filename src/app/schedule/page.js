@@ -87,6 +87,7 @@ function ScheduleInner() {
   const [courses, setCourses] = useState([]);
   const [slots, setSlots] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [periodTimes, setPeriodTimes] = useState(DEFAULT_PERIOD_TIMES);
   const [week, setWeek] = useState(1);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState(null);
@@ -122,14 +123,23 @@ function ScheduleInner() {
 
   async function loadAll() {
     setLoading(true);
-    const [{ data: courseRows }, { data: slotRows }, { data: taskRows }] = await Promise.all([
+    const [{ data: courseRows }, { data: slotRows }, { data: taskRows }, { data: periodRows }] = await Promise.all([
       supabase.from("courses").select("*").eq("owner_id", user.id),
       supabase.from("schedule_slots").select("*").eq("owner_id", user.id),
       supabase.from("tasks").select("*").eq("owner_id", user.id),
+      supabase.from("period_times").select("*").eq("owner_id", user.id),
     ]);
     setCourses(courseRows || []);
     setSlots(slotRows || []);
     setTasks(taskRows || []);
+    // 如果用户在"设置"页面自定义过某一节课的时间，就用自定义的；没设置过的节次照旧用默认时间
+    const mergedPeriodTimes = DEFAULT_PERIOD_TIMES.map((p) => {
+      const custom = (periodRows || []).find((r) => r.period_number === p.period);
+      return custom
+        ? { period: p.period, start: custom.start_time.slice(0, 5), duration: custom.duration_minutes }
+        : p;
+    });
+    setPeriodTimes(mergedPeriodTimes);
     setLoading(false);
   }
 
@@ -414,7 +424,7 @@ function ScheduleInner() {
     loadAll();
   }
 
-  const periods = DEFAULT_PERIOD_TIMES;
+  const periods = periodTimes;
 
   return (
     <div>
@@ -441,8 +451,8 @@ function ScheduleInner() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "56px repeat(7, minmax(96px, 1fr))",
-              minWidth: 760,
+              // 用 minmax(0, 1fr) 让每一列可以缩到比内容还窄，整周 7 天能在手机屏幕宽度内完整显示，不用左右滑动
+              gridTemplateColumns: "30px repeat(7, minmax(0, 1fr))",
             }}
           >
             <div />
@@ -522,15 +532,14 @@ function ScheduleInner() {
               <Fragment key={p.period}>
                 <div
                   style={{
-                    padding: "8px 4px",
+                    padding: "6px 2px",
                     textAlign: "center",
-                    fontSize: 11,
                     color: "var(--ink-soft)",
                     borderTop: "1px solid var(--border)",
                   }}
                 >
-                  <div>{p.period}</div>
-                  <div>{p.start}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700 }}>{p.period}</div>
+                  <div style={{ fontSize: 8 }}>{p.start}</div>
                 </div>
                 {WEEKDAY_LABELS.map((_, dayIdx) => {
                   const slot = slotAt(dayIdx, p.period);
@@ -547,8 +556,9 @@ function ScheduleInner() {
                         minHeight: 56,
                         borderTop: "1px solid var(--border)",
                         borderLeft: "1px solid var(--border)",
-                        padding: 4,
+                        padding: 2,
                         cursor: "pointer",
+                        overflow: "hidden",
                       }}
                     >
                       {course && (
@@ -557,10 +567,11 @@ function ScheduleInner() {
                             position: "relative",
                             height: "100%",
                             borderRadius: 8,
-                            padding: "6px 8px",
+                            padding: "4px 3px",
                             background: `hsl(${course.color_hue}, 60%, 92%)`,
                             color: `hsl(${course.color_hue}, 55%, 30%)`,
-                            fontSize: 12,
+                            fontSize: 11,
+                            wordBreak: "break-word",
                           }}
                         >
                           {pendingCourseTasks.length > 0 && (
