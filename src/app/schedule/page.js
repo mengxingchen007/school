@@ -32,6 +32,7 @@ function emptyDraft(day, period) {
     slotId: null,
     name: "",
     teacher: "",
+    location: "",
     hue: COLOR_HUE_PRESETS[0],
     customWeeks: [...ALL_WEEK_NUMBERS],
     day,
@@ -182,6 +183,7 @@ function ScheduleInner() {
       slotId: slot.id,
       name: course.name,
       teacher: course.teacher || "",
+      location: course.location || "",
       hue: course.color_hue,
       customWeeks: weeksFromCourse(course),
       day: slot.day_of_week,
@@ -249,6 +251,7 @@ function ScheduleInner() {
         .update({
           name: draft.name.trim(),
           teacher: draft.teacher.trim(),
+          location: draft.location.trim(),
           color_hue: draft.hue,
           week_pattern: weekPatternToSave,
           custom_weeks: customWeeksToSave,
@@ -275,6 +278,7 @@ function ScheduleInner() {
           owner_id: user.id,
           name: draft.name.trim(),
           teacher: draft.teacher.trim(),
+          location: draft.location.trim(),
           color_hue: draft.hue,
           week_pattern: weekPatternToSave,
           custom_weeks: customWeeksToSave,
@@ -356,6 +360,7 @@ function ScheduleInner() {
         include: true,
         name: c.name || "",
         teacher: c.teacher || "",
+        location: c.location || "",
         day: typeof c.day_of_week === "number" ? c.day_of_week : 0,
         periodStart: c.period_start || 1,
         periodCount: c.period_count || 1,
@@ -395,6 +400,7 @@ function ScheduleInner() {
           owner_id: user.id,
           name: c.name.trim(),
           teacher: c.teacher.trim(),
+          location: (c.location || "").trim(),
           color_hue: c.hue,
           week_pattern: c.weekPattern,
           custom_weeks: null,
@@ -460,10 +466,10 @@ function ScheduleInner() {
               <div
                 key={label}
                 style={{
-                  padding: "10px 4px",
+                  padding: "8px 4px",
                   textAlign: "center",
                   fontWeight: 600,
-                  fontSize: 13,
+                  fontSize: 11,
                   borderBottom: "1px solid var(--border)",
                   borderLeft: "1px solid var(--border)",
                 }}
@@ -504,7 +510,7 @@ function ScheduleInner() {
                           gap: 3,
                           padding: "1px 5px",
                           borderRadius: 6,
-                          fontSize: 10,
+                          fontSize: 9,
                           fontWeight: 600,
                           cursor: "pointer",
                           background: `hsl(${bgHue}, 65%, 90%)`,
@@ -538,8 +544,8 @@ function ScheduleInner() {
                     borderTop: "1px solid var(--border)",
                   }}
                 >
-                  <div style={{ fontSize: 12, fontWeight: 700 }}>{p.period}</div>
-                  <div style={{ fontSize: 8 }}>{p.start}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700 }}>{p.period}</div>
+                  <div style={{ fontSize: 7 }}>{p.start}</div>
                 </div>
                 {WEEKDAY_LABELS.map((_, dayIdx) => {
                   const slot = slotAt(dayIdx, p.period);
@@ -570,7 +576,7 @@ function ScheduleInner() {
                             padding: "4px 3px",
                             background: `hsl(${course.color_hue}, 60%, 92%)`,
                             color: `hsl(${course.color_hue}, 55%, 30%)`,
-                            fontSize: 11,
+                            fontSize: 10,
                             wordBreak: "break-word",
                           }}
                         >
@@ -607,9 +613,10 @@ function ScheduleInner() {
                             </div>
                           )}
                           <div style={{ fontWeight: 700 }}>{course.name}</div>
-                          {course.teacher && <div>{course.teacher}</div>}
+                          {course.teacher && <div style={{ fontSize: 9 }}>{course.teacher}</div>}
+                          {course.location && <div style={{ fontSize: 9 }}>{course.location}</div>}
                           {course.week_pattern !== "all" && (
-                            <div style={{ opacity: 0.8 }}>{WEEK_PATTERN_LABELS[course.week_pattern]}</div>
+                            <div style={{ opacity: 0.8, fontSize: 9 }}>{WEEK_PATTERN_LABELS[course.week_pattern]}</div>
                           )}
                         </div>
                       )}
@@ -657,6 +664,15 @@ function ScheduleInner() {
                 className="input"
                 value={draft.teacher}
                 onChange={(e) => setDraft({ ...draft, teacher: e.target.value })}
+              />
+            </div>
+            <div className="field">
+              <label>上课地点（可选）</label>
+              <input
+                className="input"
+                placeholder="例如：3号楼302"
+                value={draft.location}
+                onChange={(e) => setDraft({ ...draft, location: e.target.value })}
               />
             </div>
             <div className="field">
@@ -894,6 +910,13 @@ function ScheduleInner() {
                         value={c.teacher}
                         placeholder="老师（可选）"
                         onChange={(e) => updateRecognizedCourse(idx, { teacher: e.target.value })}
+                      />
+                      <input
+                        className="input"
+                        style={{ width: 100 }}
+                        value={c.location}
+                        placeholder="地点（可选）"
+                        onChange={(e) => updateRecognizedCourse(idx, { location: e.target.value })}
                       />
                       <select
                         className="input"
