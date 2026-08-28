@@ -840,7 +840,6 @@ function ScheduleInner() {
               ref={recognizeFileInputRef}
               type="file"
               accept="image/*"
-              capture="environment"
               style={{ display: "none" }}
               onChange={handleRecognizeFileChange}
             />
