@@ -92,6 +92,7 @@ function ScheduleInner() {
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [now, setNow] = useState(null);
   const dragRef = useRef({ active: false, target: true });
 
   // ↓↓↓ 拍照识别课表功能用到的状态，独立于上面已有的逻辑
@@ -102,6 +103,15 @@ function ScheduleInner() {
   const [recognizedCourses, setRecognizedCourses] = useState([]);
   const [importing, setImporting] = useState(false);
   const recognizeFileInputRef = useRef(null);
+
+  useEffect(() => {
+    function updateNow() {
+      setNow(new Date());
+    }
+    updateNow();
+    const timer = window.setInterval(updateNow, 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     function endDrag() {
@@ -415,6 +425,46 @@ function ScheduleInner() {
   }
 
   const periods = DEFAULT_PERIOD_TIMES;
+  const todayDayIndex = now ? (now.getDay() + 6) % 7 : null;
+  const currentMinutes = now ? now.getHours() * 60 + now.getMinutes() : null;
+
+  function minutesFromTime(value) {
+    const [hours, minutes] = value.split(":").map(Number);
+    return hours * 60 + minutes;
+  }
+
+  function timingForSlot(slot) {
+    const firstPeriod = periods.find((p) => p.period === slot.period_start);
+    const lastPeriodNumber = slot.period_start + slot.period_count - 1;
+    const lastPeriod = periods.find((p) => p.period === lastPeriodNumber) || firstPeriod;
+    if (!firstPeriod || !lastPeriod) return null;
+    const startMinutes = minutesFromTime(firstPeriod.start);
+    const endMinutes = minutesFromTime(lastPeriod.start) + lastPeriod.duration;
+    const endHours = String(Math.floor(endMinutes / 60)).padStart(2, "0");
+    const endMinutePart = String(endMinutes % 60).padStart(2, "0");
+    return {
+      startMinutes,
+      endMinutes,
+      label: `${firstPeriod.start}–${endHours}:${endMinutePart}`,
+    };
+  }
+
+  const todayCourses = todayDayIndex === null
+    ? []
+    : slots
+        .filter((slot) => slot.day_of_week === todayDayIndex)
+        .map((slot) => ({
+          slot,
+          course: courses.find((course) => course.id === slot.course_id),
+          timing: timingForSlot(slot),
+        }))
+        .filter(({ course, timing }) => course && timing && courseActiveOnWeek(course, week))
+        .sort((a, b) => a.slot.period_start - b.slot.period_start);
+
+  const currentCourse = todayCourses.find(
+    ({ timing }) => currentMinutes >= timing.startMinutes && currentMinutes < timing.endMinutes
+  );
+  const nextCourse = todayCourses.find(({ timing }) => timing.startMinutes > currentMinutes);
 
   return (
     <div>
@@ -434,6 +484,125 @@ function ScheduleInner() {
         </div>
       </div>
 
+      <div
+        className="card"
+        style={{
+          marginBottom: 16,
+          padding: 18,
+          background: "linear-gradient(135deg, hsl(175, 65%, 96%), hsl(210, 70%, 97%))",
+          border: "1px solid hsl(175, 45%, 82%)",
+        }}
+      >
+        <div style={{ display: "flex", gap: 20, alignItems: "stretch", flexWrap: "wrap" }}>
+          <div style={{ minWidth: 150, flex: "0 0 auto" }}>
+            <div style={{ fontSize: 13, color: "var(--ink-soft)", fontWeight: 600 }}>今天</div>
+            <div style={{ fontSize: 30, lineHeight: 1.15, fontWeight: 800, marginTop: 4 }}>
+              {now ? `${now.getMonth() + 1}月${now.getDate()}日` : "读取日期中"}
+            </div>
+            <div style={{ marginTop: 6, fontSize: 15, fontWeight: 600 }}>
+              {now ? WEEKDAY_LABELS[todayDayIndex] : ""}
+            </div>
+            <div
+              style={{
+                display: "inline-block",
+                marginTop: 12,
+                padding: "4px 9px",
+                borderRadius: 999,
+                fontSize: 12,
+                background: "rgba(255,255,255,0.78)",
+                color: "var(--ink-soft)",
+              }}
+            >
+              当前查看：第 {week} 周
+            </div>
+          </div>
+
+          <div style={{ flex: "1 1 420px", minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 10 }}>今天的课程</div>
+            {loading ? (
+              <div style={{ color: "var(--ink-soft)", fontSize: 14 }}>正在读取今天的课程...</div>
+            ) : todayCourses.length === 0 ? (
+              <div
+                style={{
+                  padding: "16px 18px",
+                  borderRadius: 10,
+                  background: "rgba(255,255,255,0.72)",
+                  color: "var(--ink-soft)",
+                }}
+              >
+                今天没有课程，好好安排自己的时间吧。
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {todayCourses.map(({ slot, course, timing }) => {
+                  const isCurrent = currentCourse?.slot.id === slot.id;
+                  const isNext = !currentCourse && nextCourse?.slot.id === slot.id;
+                  return (
+                    <button
+                      key={slot.id}
+                      type="button"
+                      onClick={() => openEdit(slot)}
+                      style={{
+                        width: "100%",
+                        border: isCurrent
+                          ? `2px solid hsl(${course.color_hue}, 65%, 42%)`
+                          : "1px solid rgba(0,0,0,0.08)",
+                        borderRadius: 10,
+                        padding: "10px 12px",
+                        background: isCurrent
+                          ? `hsl(${course.color_hue}, 70%, 88%)`
+                          : "rgba(255,255,255,0.84)",
+                        color: "var(--ink)",
+                        textAlign: "left",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 5,
+                          alignSelf: "stretch",
+                          borderRadius: 999,
+                          background: `hsl(${course.color_hue}, 62%, 48%)`,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ display: "block", fontWeight: 800, fontSize: 15 }}>
+                          {course.name}
+                        </span>
+                        <span style={{ display: "block", marginTop: 3, fontSize: 12, color: "var(--ink-soft)" }}>
+                          第 {slot.period_start}
+                          {slot.period_count > 1 ? `–${slot.period_start + slot.period_count - 1}` : ""} 节 · {timing.label}
+                          {course.teacher ? ` · ${course.teacher}` : ""}
+                        </span>
+                      </span>
+                      {(isCurrent || isNext) && (
+                        <span
+                          style={{
+                            padding: "4px 8px",
+                            borderRadius: 999,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            whiteSpace: "nowrap",
+                            background: isCurrent ? `hsl(${course.color_hue}, 65%, 42%)` : "hsl(42, 85%, 90%)",
+                            color: isCurrent ? "white" : "hsl(35, 70%, 30%)",
+                          }}
+                        >
+                          {isCurrent ? "正在上课" : "下一节"}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {loading ? (
         <div style={{ color: "var(--ink-soft)" }}>加载中...</div>
       ) : (
@@ -446,21 +615,30 @@ function ScheduleInner() {
             }}
           >
             <div />
-            {WEEKDAY_LABELS.map((label) => (
+            {WEEKDAY_LABELS.map((label, dayIdx) => {
+              const isToday = dayIdx === todayDayIndex;
+              return (
               <div
                 key={label}
+                aria-current={isToday ? "date" : undefined}
                 style={{
                   padding: "10px 4px",
                   textAlign: "center",
-                  fontWeight: 600,
+                  fontWeight: isToday ? 800 : 600,
                   fontSize: 13,
                   borderBottom: "1px solid var(--border)",
                   borderLeft: "1px solid var(--border)",
+                  background: isToday ? "hsl(175, 65%, 92%)" : undefined,
+                  color: isToday ? "hsl(175, 60%, 28%)" : undefined,
                 }}
               >
-                {label}
+                <div>{label}</div>
+                {isToday && now && (
+                  <div style={{ fontSize: 10, marginTop: 2 }}>{now.getMonth() + 1}/{now.getDate()} · 今天</div>
+                )}
               </div>
-            ))}
+              );
+            })}
 
             <div style={{ borderTop: "1px solid var(--border)" }} />
             {WEEKDAY_LABELS.map((_, dayIdx) => {
@@ -477,6 +655,7 @@ function ScheduleInner() {
                     flexWrap: "wrap",
                     gap: 3,
                     alignContent: "flex-start",
+                    background: dayIdx === todayDayIndex ? "hsl(175, 55%, 98%)" : undefined,
                   }}
                 >
                   {dayTasks.map((t) => {
@@ -549,6 +728,7 @@ function ScheduleInner() {
                         borderLeft: "1px solid var(--border)",
                         padding: 4,
                         cursor: "pointer",
+                        background: dayIdx === todayDayIndex ? "hsl(175, 55%, 98%)" : undefined,
                       }}
                     >
                       {course && (
