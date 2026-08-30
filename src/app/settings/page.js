@@ -21,6 +21,7 @@ export default function SettingsPage() {
 function SettingsInner() {
   const { user } = useUser();
   const [rows, setRows] = useState(toRows(DEFAULT_PERIOD_TIMES));
+  const [termStartDate, setTermStartDate] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -32,7 +33,10 @@ function SettingsInner() {
 
   async function load() {
     setLoading(true);
-    const { data } = await supabase.from("period_times").select("*").eq("owner_id", user.id);
+    const [{ data }, { data: profileRow }] = await Promise.all([
+      supabase.from("period_times").select("*").eq("owner_id", user.id),
+      supabase.from("profiles").select("term_start_date").eq("id", user.id).single(),
+    ]);
     const merged = DEFAULT_PERIOD_TIMES.map((p) => {
       const custom = (data || []).find((r) => r.period_number === p.period);
       return custom
@@ -40,6 +44,7 @@ function SettingsInner() {
         : { period: p.period, start: p.start, duration: p.duration };
     });
     setRows(merged);
+    setTermStartDate(profileRow?.term_start_date || "");
     setLoading(false);
   }
 
@@ -63,9 +68,13 @@ function SettingsInner() {
       duration_minutes: Number(r.duration) || 45,
     }));
     const { error } = await supabase.from("period_times").upsert(payload, { onConflict: "owner_id,period_number" });
+    const { error: profileErr } = await supabase
+      .from("profiles")
+      .update({ term_start_date: termStartDate || null })
+      .eq("id", user.id);
     setSaving(false);
-    if (error) {
-      setMessage("保存失败：" + error.message);
+    if (error || profileErr) {
+      setMessage("保存失败：" + (error?.message || profileErr?.message));
       return;
     }
     setMessage("保存成功，回课表页面就能看到新的时间了");
@@ -81,7 +90,28 @@ function SettingsInner() {
       {loading ? (
         <div style={{ color: "var(--ink-soft)" }}>加载中...</div>
       ) : (
-        <div className="card">
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div className="card">
+            <h3 style={{ marginTop: 0 }}>开学日期</h3>
+            <p style={{ fontSize: 13, color: "var(--ink-soft)" }}>
+              填一下"第1周星期一"是几号，课表页面就会显示每天具体的日期，并且自动高亮今天、打开课表时自动跳到今天所在的那一周。不填的话课表照旧正常使用，只是不显示日期。
+            </p>
+            <div className="field" style={{ marginBottom: 0, maxWidth: 220 }}>
+              <label>第1周周一的日期</label>
+              <input
+                className="input"
+                type="date"
+                value={termStartDate}
+                onChange={(e) => {
+                  setMessage("");
+                  setTermStartDate(e.target.value);
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="card">
+          <h3 style={{ marginTop: 0 }}>每节课时间</h3>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {rows.map((r) => (
               <div key={r.period} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -128,6 +158,7 @@ function SettingsInner() {
             <button className="btn" disabled={saving} onClick={save}>
               {saving ? "保存中..." : "保存"}
             </button>
+          </div>
           </div>
         </div>
       )}
