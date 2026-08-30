@@ -32,6 +32,7 @@ function emptyDraft(day, period) {
     slotId: null,
     name: "",
     teacher: "",
+    location: "",
     hue: COLOR_HUE_PRESETS[0],
     customWeeks: [...ALL_WEEK_NUMBERS],
     day,
@@ -87,6 +88,7 @@ function ScheduleInner() {
   const [courses, setCourses] = useState([]);
   const [slots, setSlots] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [periodTimes, setPeriodTimes] = useState(DEFAULT_PERIOD_TIMES);
   const [week, setWeek] = useState(1);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState(null);
@@ -132,14 +134,23 @@ function ScheduleInner() {
 
   async function loadAll() {
     setLoading(true);
-    const [{ data: courseRows }, { data: slotRows }, { data: taskRows }] = await Promise.all([
+    const [{ data: courseRows }, { data: slotRows }, { data: taskRows }, { data: periodRows }] = await Promise.all([
       supabase.from("courses").select("*").eq("owner_id", user.id),
       supabase.from("schedule_slots").select("*").eq("owner_id", user.id),
       supabase.from("tasks").select("*").eq("owner_id", user.id),
+      supabase.from("period_times").select("*").eq("owner_id", user.id),
     ]);
     setCourses(courseRows || []);
     setSlots(slotRows || []);
     setTasks(taskRows || []);
+    // 如果用户在"设置"页面自定义过某一节课的时间，就用自定义的；没设置过的节次照旧用默认时间
+    const mergedPeriodTimes = DEFAULT_PERIOD_TIMES.map((p) => {
+      const custom = (periodRows || []).find((r) => r.period_number === p.period);
+      return custom
+        ? { period: p.period, start: custom.start_time.slice(0, 5), duration: custom.duration_minutes }
+        : p;
+    });
+    setPeriodTimes(mergedPeriodTimes);
     setLoading(false);
   }
 
@@ -182,6 +193,7 @@ function ScheduleInner() {
       slotId: slot.id,
       name: course.name,
       teacher: course.teacher || "",
+      location: course.location || "",
       hue: course.color_hue,
       customWeeks: weeksFromCourse(course),
       day: slot.day_of_week,
@@ -249,6 +261,7 @@ function ScheduleInner() {
         .update({
           name: draft.name.trim(),
           teacher: draft.teacher.trim(),
+          location: draft.location.trim(),
           color_hue: draft.hue,
           week_pattern: weekPatternToSave,
           custom_weeks: customWeeksToSave,
@@ -275,6 +288,7 @@ function ScheduleInner() {
           owner_id: user.id,
           name: draft.name.trim(),
           teacher: draft.teacher.trim(),
+          location: draft.location.trim(),
           color_hue: draft.hue,
           week_pattern: weekPatternToSave,
           custom_weeks: customWeeksToSave,
@@ -356,6 +370,7 @@ function ScheduleInner() {
         include: true,
         name: c.name || "",
         teacher: c.teacher || "",
+        location: c.location || "",
         day: typeof c.day_of_week === "number" ? c.day_of_week : 0,
         periodStart: c.period_start || 1,
         periodCount: c.period_count || 1,
@@ -395,6 +410,7 @@ function ScheduleInner() {
           owner_id: user.id,
           name: c.name.trim(),
           teacher: c.teacher.trim(),
+          location: (c.location || "").trim(),
           color_hue: c.hue,
           week_pattern: c.weekPattern,
           custom_weeks: null,
@@ -424,7 +440,7 @@ function ScheduleInner() {
     loadAll();
   }
 
-  const periods = DEFAULT_PERIOD_TIMES;
+  const periods = periodTimes;
   const todayDayIndex = now ? (now.getDay() + 6) % 7 : null;
   const currentMinutes = now ? now.getHours() * 60 + now.getMinutes() : null;
 
@@ -610,8 +626,8 @@ function ScheduleInner() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "56px repeat(7, minmax(96px, 1fr))",
-              minWidth: 760,
+              // 用 minmax(0, 1fr) 让每一列可以缩到比内容还窄，整周 7 天能在手机屏幕宽度内完整显示，不用左右滑动
+              gridTemplateColumns: "30px repeat(7, minmax(0, 1fr))",
             }}
           >
             <div />
@@ -622,10 +638,10 @@ function ScheduleInner() {
                 key={label}
                 aria-current={isToday ? "date" : undefined}
                 style={{
-                  padding: "10px 4px",
+                  padding: "8px 4px",
                   textAlign: "center",
                   fontWeight: isToday ? 800 : 600,
-                  fontSize: 13,
+                  fontSize: 11,
                   borderBottom: "1px solid var(--border)",
                   borderLeft: "1px solid var(--border)",
                   background: isToday ? "hsl(175, 65%, 92%)" : undefined,
@@ -673,7 +689,7 @@ function ScheduleInner() {
                           gap: 3,
                           padding: "1px 5px",
                           borderRadius: 6,
-                          fontSize: 10,
+                          fontSize: 9,
                           fontWeight: 600,
                           cursor: "pointer",
                           background: `hsl(${bgHue}, 65%, 90%)`,
@@ -701,15 +717,14 @@ function ScheduleInner() {
               <Fragment key={p.period}>
                 <div
                   style={{
-                    padding: "8px 4px",
+                    padding: "6px 2px",
                     textAlign: "center",
-                    fontSize: 11,
                     color: "var(--ink-soft)",
                     borderTop: "1px solid var(--border)",
                   }}
                 >
-                  <div>{p.period}</div>
-                  <div>{p.start}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700 }}>{p.period}</div>
+                  <div style={{ fontSize: 7 }}>{p.start}</div>
                 </div>
                 {WEEKDAY_LABELS.map((_, dayIdx) => {
                   const slot = slotAt(dayIdx, p.period);
@@ -726,9 +741,10 @@ function ScheduleInner() {
                         minHeight: 56,
                         borderTop: "1px solid var(--border)",
                         borderLeft: "1px solid var(--border)",
-                        padding: 4,
+                        padding: 2,
                         cursor: "pointer",
                         background: dayIdx === todayDayIndex ? "hsl(175, 55%, 98%)" : undefined,
+                        overflow: "hidden",
                       }}
                     >
                       {course && (
@@ -737,10 +753,11 @@ function ScheduleInner() {
                             position: "relative",
                             height: "100%",
                             borderRadius: 8,
-                            padding: "6px 8px",
+                            padding: "4px 3px",
                             background: `hsl(${course.color_hue}, 60%, 92%)`,
                             color: `hsl(${course.color_hue}, 55%, 30%)`,
-                            fontSize: 12,
+                            fontSize: 10,
+                            wordBreak: "break-word",
                           }}
                         >
                           {pendingCourseTasks.length > 0 && (
@@ -776,9 +793,10 @@ function ScheduleInner() {
                             </div>
                           )}
                           <div style={{ fontWeight: 700 }}>{course.name}</div>
-                          {course.teacher && <div>{course.teacher}</div>}
+                          {course.teacher && <div style={{ fontSize: 9 }}>{course.teacher}</div>}
+                          {course.location && <div style={{ fontSize: 9 }}>{course.location}</div>}
                           {course.week_pattern !== "all" && (
-                            <div style={{ opacity: 0.8 }}>{WEEK_PATTERN_LABELS[course.week_pattern]}</div>
+                            <div style={{ opacity: 0.8, fontSize: 9 }}>{WEEK_PATTERN_LABELS[course.week_pattern]}</div>
                           )}
                         </div>
                       )}
@@ -826,6 +844,15 @@ function ScheduleInner() {
                 className="input"
                 value={draft.teacher}
                 onChange={(e) => setDraft({ ...draft, teacher: e.target.value })}
+              />
+            </div>
+            <div className="field">
+              <label>上课地点（可选）</label>
+              <input
+                className="input"
+                placeholder="例如：3号楼302"
+                value={draft.location}
+                onChange={(e) => setDraft({ ...draft, location: e.target.value })}
               />
             </div>
             <div className="field">
@@ -993,7 +1020,6 @@ function ScheduleInner() {
               ref={recognizeFileInputRef}
               type="file"
               accept="image/*"
-              capture="environment"
               style={{ display: "none" }}
               onChange={handleRecognizeFileChange}
             />
@@ -1063,6 +1089,13 @@ function ScheduleInner() {
                         value={c.teacher}
                         placeholder="老师（可选）"
                         onChange={(e) => updateRecognizedCourse(idx, { teacher: e.target.value })}
+                      />
+                      <input
+                        className="input"
+                        style={{ width: 100 }}
+                        value={c.location}
+                        placeholder="地点（可选）"
+                        onChange={(e) => updateRecognizedCourse(idx, { location: e.target.value })}
                       />
                       <select
                         className="input"

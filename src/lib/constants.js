@@ -10,6 +10,11 @@ export const DEFAULT_PERIOD_TIMES = [
   { period: 6, start: "14:55", duration: 45 },
   { period: 7, start: "16:00", duration: 45 },
   { period: 8, start: "16:55", duration: 45 },
+  { period: 9, start: "18:30", duration: 45 },
+  { period: 10, start: "19:25", duration: 45 },
+  { period: 11, start: "20:20", duration: 45 },
+  { period: 12, start: "21:15", duration: 45 },
+  { period: 13, start: "22:10", duration: 45 },
 ];
 
 export const COLOR_HUE_PRESETS = [175, 35, 210, 280, 340, 90];

@@ -10,6 +10,7 @@ const TABS = [
   { href: "/tasks", label: "作业考试" },
   { href: "/food", label: "吃饭抽签" },
   { href: "/group", label: "分组抽签" },
+  { href: "/settings", label: "设置" },
 ];
 
 export default function NavBar() {
